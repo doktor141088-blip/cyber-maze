@@ -1,27 +1,27 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CyberMaze: 100 Levels Quest</title>
+    <title>CyberMaze Pro: 100 Levels</title>
     <script src="https://yandex.ru"></script>
     <style>
-        body { background-color: #050206; color: #00ff41; font-family: monospace; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; }
-        .game-box { background: #000; border: 2px solid #00ff41; box-shadow: 0 0 25px rgba(0, 255, 65, 0.4); padding: 15px; border-radius: 8px; text-align: center; width: 90%; max-width: 440px; }
-        .hud { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 1.1em; border-bottom: 1px solid #00ff41; padding-bottom: 5px; }
-        #mazeContainer { position: relative; background: #111; border: 2px solid #00ff41; margin: 0 auto; display: grid; overflow: hidden; }
-        .cell { width: 30px; height: 30px; box-sizing: border-box; }
-        .wall { background: #00ff41; box-shadow: inset 0 0 5px #000; }
+        body { background-color: #050206; color: #00ff41; font-family: 'Courier New', monospace; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; }
+        .game-box { background: #000; border: 2px solid #00ff41; box-shadow: 0 0 25px rgba(0, 255, 65, 0.4); padding: 15px; border-radius: 8px; text-align: center; width: 95%; max-width: 440px; box-sizing: border-box; }
+        .hud { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 1.1em; border-bottom: 1px solid #00ff41; padding-bottom: 5px; font-weight: bold; }
+        #mazeContainer { background: #111; border: 2px solid #00ff41; margin: 10px auto; display: grid; width: max-content; }
+        .cell { width: 24px; height: 24px; box-sizing: border-box; display: flex; justify-content: center; align-items: center; font-size: 14px; }
+        .wall { background: #00ff41; box-shadow: inset 0 0 5px #000; border: 1px solid #005511; }
         .floor { background: #000; }
-        .player { background: #00ffff; border-radius: 50%; box-shadow: 0 0 8px #00ffff; position: relative; }
-        .key { background: #ffaa00; border-radius: 20%; box-shadow: 0 0 8px #ffaa00; }
-        .portal { background: #ff0055; border-radius: 10%; box-shadow: 0 0 8px #ff0055; opacity: 0.5; }
-        .portal.open { opacity: 1; background: #00ff41; box-shadow: 0 0 10px #00ff41; }
-        .enemy { background: #ff0000; border-radius: 40%; box-shadow: 0 0 8px #ff0000; }
+        .player { background: #00ffff; border-radius: 50%; box-shadow: 0 0 10px #00ffff; }
+        .key { background: #ffaa00; border-radius: 20%; box-shadow: 0 0 10px #ffaa00; }
+        .portal { background: #ff0055; border-radius: 10%; box-shadow: 0 0 8px #ff0055; opacity: 0.6; }
+        .portal.open { opacity: 1; background: #00ff41; box-shadow: 0 0 12px #00ff41; }
+        .enemy { background: #ff0000; border-radius: 50%; box-shadow: 0 0 10px #ff0000; }
         .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 180px; margin: 15px auto 0 auto; }
-        .btn { background: #000; border: 1px solid #00ff41; color: #00ff41; padding: 12px; font-size: 1.3em; font-weight: bold; cursor: pointer; border-radius: 5px; box-shadow: 0 0 5px rgba(0,255,65,0.3); }
+        .btn { background: #000; border: 1px solid #00ff41; color: #00ff41; padding: 12px; font-size: 1.3em; font-weight: bold; cursor: pointer; border-radius: 5px; box-shadow: 0 0 5px rgba(0,255,65,0.3); outline: none; }
         .btn:active { background: #00ff41; color: #000; }
-        #msg { margin-top: 10px; font-weight: bold; min-height: 20px; color: #ffaa00; }
+        #msg { margin-top: 10px; font-weight: bold; min-height: 20px; color: #ffaa00; font-size: 0.95em; }
     </style>
 </head>
 <body>
@@ -32,7 +32,7 @@
         <div>TANGALAR: <span id="lblCoins">0</span> 🪙</div>
     </div>
     <div id="mazeContainer"></div>
-    <div id="msg">Kalitni toping va Portalga boring!</div>
+    <div id="msg">Kalitni (🔑) toping va Portalga (🔴) boring!</div>
     
     <div class="controls">
         <div></div><button class="btn" onclick="move(0, -1)">▲</button><div></div>
@@ -44,6 +44,25 @@
     let ysdk;
     YaGames.init().then(_sdk => { ysdk = _sdk; }).catch(e => {});
 
+    // Audio tizimi (Hech qanday faylsiz ovoz chiqarish)
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(freq, type, duration) {
+        try {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        } catch(e) {}
+    }
+    function playTypeSound() { playSound(600, 'triangle', 0.04); }
+    function playSuccessSound() { playSound(700, 'sine', 0.1); setTimeout(() => playSound(1000, 'sine', 0.15), 80); }
+    function playErrorSound() { playSound(130, 'sawtooth', 0.25); }
     let level = 1;
     let coins = 0;
     let mapSize = 9; 
@@ -55,19 +74,16 @@
     let enemyInterval;
 
     function generateMaze() {
-        mapSize = 9 + Math.floor(level / 5) * 2; 
-        if(mapSize > 15) mapSize = 15; 
+        mapSize = 9 + Math.floor(level / 3) * 2; 
+        if(mapSize > 13) mapSize = 13; 
         
         grid = [];
-        const container = document.getElementById("mazeContainer");
-        container.innerHTML = "";
-        container.style.gridTemplateColumns = repeat(${mapSize}, 30px);
-        container.style.gridTemplateRows = repeat(${mapSize}, 30px);
-
         for (let y = 0; y < mapSize; y++) {
             grid[y] = [];
             for (let x = 0; x < mapSize; x++) {
-                if (x === 0  x === mapSize - 1  y === 0  y === mapSize - 1  (x % 2 === 0 && y % 2 === 0 && Math.random() > 0.3)) {
+                if (x === 0  x === mapSize - 1  y === 0 || y === mapSize - 1) {
+                    grid[y][x] = 'W'; 
+                } else if (x % 2 === 0 && y % 2 === 0 && Math.random() > 0.25) {
                     grid[y][x] = 'W'; 
                 } else {
                     grid[y][x] = 'F'; 
@@ -79,13 +95,17 @@
         grid[player.y][player.x] = 'F';
 
         key.x = mapSize - 2; key.y = mapSize - 2; key.found = false;
+        grid[key.y][key.x] = 'F';
+
         portal.x = mapSize - 2; portal.y = 1;
+        grid[portal.y][portal.x] = 'F';
+
         enemies = [];
-        let enemyCount = Math.min(Math.floor(level / 3) + 1, 4);
+        let enemyCount = Math.min(Math.floor(level / 2) + 1, 3);
         for(let i=0; i<enemyCount; i++) {
             let ex = Math.floor(Math.random() * (mapSize-3)) + 2;
             let ey = Math.floor(Math.random() * (mapSize-3)) + 2;
-            if(grid[ey][ex] === 'F' && (ex !== player.x || ey !== player.y)) {
+            if(grid[ey][ex] === 'F' && (ex !== player.x  ey !== player.y) && (ex !== key.x  ey !== key.y)) {
                 enemies.push({ x: ex, y: ey, dx: Math.random() > 0.5 ? 1 : -1, dy: Math.random() > 0.5 ? 1 : -1 });
             }
         }
@@ -97,6 +117,9 @@
     function render() {
         const container = document.getElementById("mazeContainer");
         container.innerHTML = "";
+        container.style.gridTemplateColumns = repeat(${mapSize}, 24px);
+        container.style.gridTemplateRows = repeat(${mapSize}, 24px);
+
         for (let y = 0; y < mapSize; y++) {
             for (let x = 0; x < mapSize; x++) {
                 const cell = document.createElement("div");
@@ -104,16 +127,31 @@
                 if (grid[y][x] === 'W') cell.classList.add("wall");
                 else cell.classList.add("floor");
 
-                if (x === player.x && y === player.y) cell.classList.add("player");
-                else if (x === key.x && y === key.y && !key.found) cell.classList.add("key");
+                if (x === player.x && y === player.y) {
+                    cell.classList.add("player");
+                    cell.innerText = "🕵️";
+                }
+                else if (x === key.x && y === key.y && !key.found) {
+                    cell.classList.add("key");
+                    cell.innerText = "🔑";
+                }
                 else if (x === portal.x && y === portal.y) {
                     cell.classList.add("portal");
-                    if (key.found) cell.classList.add("open");
+                    cell.innerText = "🔴";
+                    if (key.found) {
+                        cell.classList.add("open");
+                        cell.innerText = "🟢";
+                    }
                 }
                 
+                let hasEnemy = false;
                 enemies.forEach(e => {
-                    if(e.x === x && e.y === y) cell.classList.add("enemy");
+                    if(e.x === x && e.y === y) hasEnemy = true;
                 });
+                if(hasEnemy && !(x === player.x && y === player.y)) {
+                    cell.classList.add("enemy");
+                    cell.innerText = "👾";
+                }
 
                 container.appendChild(cell);
             }
@@ -121,6 +159,7 @@
     }
 
     function move(dx, dy) {
+        playTypeSound();
         let newX = player.x + dx;
         let newY = player.y + dy;
         
@@ -135,24 +174,25 @@
     function checkLogic() {
         if (player.x === key.x && player.y === key.y && !key.found) {
             key.found = true;
-            document.getElementById("msg").innerText = "🔑 Kalit topildi! Portal ochildi!";
+            playSuccessSound();
+            document.getElementById("msg").innerText = "🔑 Kalit topildi! Chiqish portali (🟢) ochildi!";
             document.getElementById("msg").style.color = "#00ff41";
         }
-
-        if (player.x === portal.x && player.y === portal.y && key.found) {
+            if (player.x === portal.x && player.y === portal.y && key.found) {
             clearInterval(enemyInterval);
+            playSuccessSound();
             coins += 100;
             level++;
             document.getElementById("lblCoins").innerText = coins;
             document.getElementById("lblLevel").innerText = level;
             
             if (level > 100) {
-                document.getElementById("msg").innerText = "🎉 TABRIKLAYMIZ! SIZ DUNYONI QUTQARDINGIZ!";
-                document.getElementById("controlArea").style.display = "none";
+                document.getElementById("msg").innerText = "🎉 TABRIKLAYMIZ! SIZ MUKAMMAL G'ALABA QOZONDINGIZ!";
                 return;
             }
             
-            document.getElementById("msg").innerText = "Keyingi murakkab darajaga o'tilmoqda...";
+            document.getElementById("msg").innerText = "Yangi kiber-tarmoq yuklanmoqda...";
+            document.getElementById("msg").style.color = "#ffaa00";
             setTimeout(generateMaze, 1000);
         }
 
@@ -165,16 +205,23 @@
 
     function startEnemyAI() {
         clearInterval(enemyInterval);
-        let speed = Math.max(600 - (level * 10), 200); 
+        let speed = Math.max(500 - (level * 15), 180); 
         enemyInterval = setInterval(() => {
             enemies.forEach(e => {
-                let nextX = e.x + e.dx;
-                let nextY = e.y + e.dy;
-                
-                if(grid[nextY][nextX] === 'W') {
+                let directions = [{x:e.dx, y:0}, {x:0, y:e.dy}, {x:-e.dx, y:0}, {x:0, y:-e.dy}];
+                let moved = false;
+                for(let dir of directions) {
+                    let nX = e.x + dir.x;
+                    let nY = e.y + dir.y;
+                    if(grid[nY][nX] !== 'W') {
+                        e.x = nX; e.y = nY;
+                        e.dx = dir.x; e.dy = dir.y;
+                        moved = true;
+                        break;
+                    }
+                }
+                if(!moved) {
                     e.dx *= -1; e.dy *= -1;
-                } else {
-                    e.x = nextX; e.y = nextY;
                 }
                 
                 if(e.x === player.x && e.y === player.y) {
@@ -186,14 +233,11 @@
     }
 
     function hitByEnemy() {
-        document.getElementById("msg").innerText = "🚨 Virusga chalindingiz! Bosqich boshidan boshlanadi.";
-        document.getElementById("msg").style.color = "#ff0000";
-        player.x = 1; player.y = 1;
-        key.found = false;
-        render();
-    }
-
-    window.onload = generateMaze;
-</script>
-</body>
-</html>
+        playErrorSound();
+document.getElementById("msg").innerText = "🚨 Virusga (👾) chalindingiz! Tarmoq qayta yuklanmoqda.";
+document.getElementById("msg").style.color = "#ff0000";
+player.x = 1; player.y = 1;
+key.found = false;
+render();
+}
+window.onload = generateMaze;
