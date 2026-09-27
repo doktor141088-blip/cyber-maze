@@ -1,20 +1,24 @@
- <!DOCTYPE html>
+ DOCTYPE html>
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CyberMaze Pro: 100 Levels</title>
+    <!-- Yandex Games SDK ulanishi -->
     <script src="https://yandex.ru"></script>
     <style>
         body { background-color: #050206; color: #00ff41; font-family: 'Courier New', monospace; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; }
         .game-box { background: #000; border: 2px solid #00ff41; box-shadow: 0 0 25px rgba(0, 255, 65, 0.4); padding: 15px; border-radius: 8px; text-align: center; width: 95%; max-width: 440px; box-sizing: border-box; }
         .hud { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 1.1em; border-bottom: 1px solid #00ff41; padding-bottom: 5px; font-weight: bold; }
+        .hud-stat { display: flex; gap: 10px; }
         #mazeContainer { background: #111; border: 2px solid #00ff41; margin: 10px auto; display: grid; width: max-content; }
-        .cell { width: 24px; height: 24px; box-sizing: border-box; display: flex; justify-content: center; align-items: center; font-size: 14px; }
+        .cell { width: 24px; height: 24px; box-sizing: border-box; display: flex; justify-content: center; align-items: center; font-size: 14px; transition: all 0.1s ease; }
         .wall { background: #00ff41; box-shadow: inset 0 0 5px #000; border: 1px solid #005511; }
         .floor { background: #000; }
         .player { background: #00ffff; border-radius: 50%; box-shadow: 0 0 10px #00ffff; }
+        .player.shielded { background: #ffcc00 !important; box-shadow: 0 0 15px #ffcc00 !important; animation: pulse 0.5s infinite alternate; }
         .key { background: #ffaa00; border-radius: 20%; box-shadow: 0 0 10px #ffaa00; }
+        .shield-item { background: #00ffcc; border-radius: 30%; box-shadow: 0 0 10px #00ffcc; }
         .portal { background: #ff0055; border-radius: 10%; box-shadow: 0 0 8px #ff0055; opacity: 0.6; }
         .portal.open { opacity: 1; background: #00ff41; box-shadow: 0 0 12px #00ff41; }
         .enemy { background: #ff0000; border-radius: 50%; box-shadow: 0 0 10px #ff0000; }
@@ -22,6 +26,7 @@
         .btn { background: #000; border: 1px solid #00ff41; color: #00ff41; padding: 12px; font-size: 1.3em; font-weight: bold; cursor: pointer; border-radius: 5px; box-shadow: 0 0 5px rgba(0,255,65,0.3); outline: none; }
         .btn:active { background: #00ff41; color: #000; }
         #msg { margin-top: 10px; font-weight: bold; min-height: 20px; color: #ffaa00; font-size: 0.95em; }
+        @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.1); } }
     </style>
 </head>
 <body>
@@ -29,7 +34,10 @@
 <div class="game-box">
     <div class="hud">
         <div>BOSQICH: <span id="lblLevel">1</span>/100</div>
-        <div>TANGALAR: <span id="lblCoins">0</span> 🪙</div>
+        <div class="hud-stat">
+            <div>JON: <span id="lblLives">❤️️❤️️❤️️</span></div>
+            <div><span id="lblCoins">0</span> 🪙</div>
+        </div>
     </div>
     <div id="mazeContainer"></div>
     <div id="msg">Kalitni (🔑) toping va Portalga (🔴) boring!</div>
@@ -41,10 +49,23 @@
 </div>
 
 <script>
-    let ysdk;
-    YaGames.init().then(_sdk => { ysdk = _sdk; }).catch(e => {});
-
-    // Audio tizimi (Hech qanday faylsiz ovoz chiqarish)
+    let ysdk = null;
+    
+    // Yandex SDK-ni ishga tushirish
+    YaGames.init().then(_sdk => {
+        ysdk = _sdk;
+        // O'yin yuklanganda avtomatik ravishda birinchi reklamani ko'rsatish (Banner/Interstitial)
+        ysdk.adv.showFullscreenAdv({
+            callbacks: {
+                onClose: function(wasShown) { generateMaze(); },
+                onError: function(error) { generateMaze(); }
+            }
+        });
+    }).catch(e => {
+        // SDK yuklanmay qolsa ham o'yin ishlayverishi uchun
+        generateMaze();
+    });
+ // Audio tizimi
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function playSound(freq, type, duration) {
         try {
@@ -63,15 +84,29 @@
     function playTypeSound() { playSound(600, 'triangle', 0.04); }
     function playSuccessSound() { playSound(700, 'sine', 0.1); setTimeout(() => playSound(1000, 'sine', 0.15), 80); }
     function playErrorSound() { playSound(130, 'sawtooth', 0.25); }
+    function playShieldSound() { playSound(880, 'sine', 0.3); }
+
     let level = 1;
     let coins = 0;
+    let lives = 3;
     let mapSize = 9; 
     let grid = [];
-    let player = { x: 1, y: 1 };
+    let player = { x: 1, y: 1, isShielded: false };
     let key = { x: 0, y: 0, found: false };
+    let shieldItem = { x: 0, y: 0, active: false };
     let portal = { x: 0, y: 0 };
     let enemies = [];
     let enemyInterval;
+    let shieldTimeout;
+
+    // Klaviaturadan boshqarish integratsiyasi
+    document.addEventListener('keydown', (e) => {
+        const keyName = e.key.toLowerCase();
+        if (keyName === 'arrowup' || keyName === 'w') move(0, -1);
+        if (keyName === 'arrowdown' || keyName === 's') move(0, 1);
+        if (keyName === 'arrowleft' || keyName === 'a') move(-1, 0);
+        if (keyName === 'arrowright' || keyName === 'd') move(1, 0);
+    });
 
     function generateMaze() {
         mapSize = 9 + Math.floor(level / 3) * 2; 
@@ -81,7 +116,7 @@
         for (let y = 0; y < mapSize; y++) {
             grid[y] = [];
             for (let x = 0; x < mapSize; x++) {
-                if (x === 0  x === mapSize - 1  y === 0 || y === mapSize - 1) {
+                if (x === 0 || x === mapSize - 1 || y === 0 || y === mapSize - 1) {
                     grid[y][x] = 'W'; 
                 } else if (x % 2 === 0 && y % 2 === 0 && Math.random() > 0.25) {
                     grid[y][x] = 'W'; 
@@ -100,21 +135,37 @@
         portal.x = mapSize - 2; portal.y = 1;
         grid[portal.y][portal.x] = 'F';
 
+        // Tasodifiy qalqon bonusi joylashuvi (50% imkoniyat bilan har bosqichda chiqadi)
+        if(Math.random() > 0.5) {
+            shieldItem.x = Math.floor(mapSize / 2);
+            shieldItem.y = Math.floor(mapSize / 2);
+            shieldItem.active = true;
+            grid[shieldItem.y][shieldItem.x] = 'F';
+        } else {
+            shieldItem.active = false;
+        }
+
         enemies = [];
         let enemyCount = Math.min(Math.floor(level / 2) + 1, 3);
         for(let i=0; i<enemyCount; i++) {
             let ex = Math.floor(Math.random() * (mapSize-3)) + 2;
             let ey = Math.floor(Math.random() * (mapSize-3)) + 2;
-            if(grid[ey][ex] === 'F' && (ex !== player.x  ey !== player.y) && (ex !== key.x  ey !== key.y)) {
+            if(grid[ey][ex] === 'F' && (ex !== player.x || ey !== player.y) && (ex !== key.x || ey !== key.y)) {
                 enemies.push({ x: ex, y: ey, dx: Math.random() > 0.5 ? 1 : -1, dy: Math.random() > 0.5 ? 1 : -1 });
             }
         }
         
+        updateHUD();
         render();
         startEnemyAI();
     }
 
-    function render() {
+    function updateHUD() {
+        document.getElementById("lblCoins").innerText = coins;
+        document.getElementById("lblLevel").innerText = level;
+        document.getElementById("lblLives").innerText = "❤️".repeat(lives) || "💀";
+    }
+ function render() {
         const container = document.getElementById("mazeContainer");
         container.innerHTML = "";
         container.style.gridTemplateColumns = repeat(${mapSize}, 24px);
@@ -130,10 +181,15 @@
                 if (x === player.x && y === player.y) {
                     cell.classList.add("player");
                     cell.innerText = "🕵️";
+                    if (player.isShielded) cell.classList.add("shielded");
                 }
                 else if (x === key.x && y === key.y && !key.found) {
                     cell.classList.add("key");
                     cell.innerText = "🔑";
+                }
+                else if (x === shieldItem.x && x !== player.x && y === shieldItem.y && y !== player.y && shieldItem.active) {
+                    cell.classList.add("shield-item");
+                    cell.innerText = "🛡️";
                 }
                 else if (x === portal.x && y === portal.y) {
                     cell.classList.add("portal");
@@ -159,85 +215,140 @@
     }
 
     function move(dx, dy) {
+        if (lives <= 0) return;
         playTypeSound();
-        let newX = player.x + dx;
-        let newY = player.y + dy;
-        
-        if (grid[newY][newX] !== 'W') {
-            player.x = newX;
-            player.y = newY;
-            checkLogic();
-            render();
-        }
-    }
-
-    function checkLogic() {
-        if (player.x === key.x && player.y === key.y && !key.found) {
-            key.found = true;
-            playSuccessSound();
-            document.getElementById("msg").innerText = "🔑 Kalit topildi! Chiqish portali (🟢) ochildi!";
-            document.getElementById("msg").style.color = "#00ff41";
-        }
-            if (player.x === portal.x && player.y === portal.y && key.found) {
-            clearInterval(enemyInterval);
-            playSuccessSound();
-            coins += 100;
-            level++;
-            document.getElementById("lblCoins").innerText = coins;
-            document.getElementById("lblLevel").innerText = level;
-            
-            if (level > 100) {
-                document.getElementById("msg").innerText = "🎉 TABRIKLAYMIZ! SIZ MUKAMMAL G'ALABA QOZONDINGIZ!";
-                return;
-            }
-            
-            document.getElementById("msg").innerText = "Yangi kiber-tarmoq yuklanmoqda...";
-            document.getElementById("msg").style.color = "#ffaa00";
-            setTimeout(generateMaze, 1000);
-        }
-
-        enemies.forEach(e => {
-            if(e.x === player.x && e.y === player.y) {
-                hitByEnemy();
-            }
-        });
-    }
-
-    function startEnemyAI() {
-        clearInterval(enemyInterval);
-        let speed = Math.max(500 - (level * 15), 180); 
-        enemyInterval = setInterval(() => {
-            enemies.forEach(e => {
-                let directions = [{x:e.dx, y:0}, {x:0, y:e.dy}, {x:-e.dx, y:0}, {x:0, y:-e.dy}];
-                let moved = false;
-                for(let dir of directions) {
-                    let nX = e.x + dir.x;
-                    let nY = e.y + dir.y;
-                    if(grid[nY][nX] !== 'W') {
-                        e.x = nX; e.y = nY;
-                        e.dx = dir.x; e.dy = dir.y;
-                        moved = true;
-                        break;
-                    }
-                }
-                if(!moved) {
-                    e.dx *= -1; e.dy *= -1;
-                }
-                
-                if(e.x === player.x && e.y === player.y) {
-                    hitByEnemy();
-                }
-            });
-            render();
-        }, speed);
-    }
-
-    function hitByEnemy() {
-        playErrorSound();
-document.getElementById("msg").innerText = "🚨 Virusga (👾) chalindingiz! Tarmoq qayta yuklanmoqda.";
-document.getElementById("msg").style.color = "#ff0000";
-player.x = 1; player.y = 1;
-key.found = false;
+Koddan ehtiyotkorlik bilan foydalaning.
+let newX = player.x + dx;
+let newY = player.y + dy;
+if (grid[newY] && grid[newY][newX] !== 'W') {
+player.x = newX;
+player.y = newY;
+checkLogic();
 render();
 }
-window.onload = generateMaze;
+}
+function checkLogic() {
+// Kalitni olish logikasi
+if (player.x === key.x && player.y === key.y && !key.found) {
+key.found = true;
+playSuccessSound();
+document.getElementById("msg").innerText = "🔑 Kalit topildi! Chiqish portali (🟢) ochildi!";
+document.getElementById("msg").style.color = "#00ff41";
+}
+// Qalqonni olish logikasi
+if (shieldItem.active && player.x === shieldItem.x && player.y === shieldItem.y) {
+shieldItem.active = false;
+player.isShielded = true;
+playShieldSound();
+document.getElementById("msg").innerText = "🛡️ Qalqon faollashdi! 5 soniya daxlsizsiz!";
+document.getElementById("msg").style.color = "#00ffcc";
+clearTimeout(shieldTimeout);
+shieldTimeout = setTimeout(() => {
+player.isShielded = false;
+document.getElementById("msg").innerText = "Qalqon muddati tugadi!";
+document.getElementById("msg").style.color = "#ffaa00";
+render();
+}, 5000);
+}
+// Portalga kirish va Yandex Reklama chiqarish logikasi
+if (player.x === portal.x && player.y === portal.y && key.found) {
+clearInterval(enemyInterval);
+playSuccessSound();
+coins += 100;
+level++;
+if (level > 100) {
+document.getElementById("msg").innerText = "🎉 TABRIKLAYMIZ! SIZ MUKAMMAL G'ALABA QOZONDINGIZ!";
+return;
+}
+document.getElementById("msg").innerText = "Kiber-reklama yuklanmoqda...";
+// Har bosqichdan o'tganda Yandex Interstitial Reklamasini ko'rsatish
+if (ysdk) {
+ysdk.adv.showFullscreenAdv({
+callbacks: {
+onClose: function() { generateMaze(); },
+onError: function() { generateMaze(); }
+}
+});
+} else {
+setTimeout(generateMaze, 1000);
+ }
+}
+// Dushman urilgandagi tekshiruv
+enemies.forEach(e => {
+if(e.x === player.x && e.y === player.y) {
+hitByEnemy();
+}
+});
+}
+function startEnemyAI() {
+clearInterval(enemyInterval);
+let speed = Math.max(500 - (level * 15), 180);
+enemyInterval = setInterval(() => {
+enemies.forEach(e => {
+let directions = [{x:e.dx, y:0}, {x:0, y:e.dy}, {x:-e.dx, y:0}, {x:0, y:-e.dy}];
+let moved = false;
+for(let dir of directions) {
+let nX = e.x + dir.x;
+let nY = e.y + dir.y;
+if(grid[nY] && grid[nY][nX] !== 'W') {
+e.x = nX; e.y = nY;
+e.dx = dir.x; e.dy = dir.y;
+moved = true;
+break;
+}
+}
+if(!moved) {
+e.dx *= -1; e.dy *= -1;
+}
+if(e.x === player.x && e.y === player.y) {
+hitByEnemy();
+}
+});
+render();
+}, speed);
+}
+function hitByEnemy() {
+if (player.isShielded) return; // Qalqon bo'lsa zarar yetmaydi
+playErrorSound();
+lives--;
+updateHUD();
+if (lives <= 0) {
+clearInterval(enemyInterval);
+document.getElementById("msg").innerText = "🚨 O'yin tugadi! Jon tiklash uchun reklama ko'ring.";
+document.getElementById("msg").style.color = "#ff0000";
+// Jon tugaganda Yandex Reward Video Reklamasini chiqarish
+if (ysdk) {
+ysdk.adv.showRewardedVideo({
+callbacks: {
+onOpen: () => {},
+onRewarded: () => {
+lives = 3;
+updateHUD();
+player.x = 1; player.y = 1;
+document.getElementById("msg").innerText = "Jonlar tiklandi! O'yin davom etadi.";
+document.getElementById("msg").style.color = "#00ff41";
+startEnemyAI();
+},
+onClose: () => {
+if(lives <= 0) {
+level = 1; coins = 0; lives = 3;
+generateMaze();
+}
+},
+onError: () => {
+// Agar reklama yuklanmasa ham o'yinchi yutqazib qo'ymasligi uchun jon beramiz
+lives = 3; generateMaze();
+}
+}
+});
+} else {
+// Offline rejim uchun test qayta yuklash
+setTimeout(() => { level = 1; coins = 0; lives = 3; generateMaze(); }, 2000);
+}
+} else {
+document.getElementById("msg").innerText = "🚨 Virus tegdi! 1 ta jon yo'qotdingiz.";
+document.getElementById("msg").style.color = "#ff5555";
+player.x = 1; player.y = 1; // Boshlang'ich nuqtaga qaytarish
+}
+render();
+}
