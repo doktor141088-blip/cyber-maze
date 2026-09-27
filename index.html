@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberMaze: 100 Levels Quest</title>
+    <script src="https://yandex.ru"></script>
+    <style>
+        body { background-color: #050206; color: #00ff41; font-family: monospace; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; }
+        .game-box { background: #000; border: 2px solid #00ff41; box-shadow: 0 0 25px rgba(0, 255, 65, 0.4); padding: 15px; border-radius: 8px; text-align: center; width: 90%; max-width: 440px; }
+        .hud { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 1.1em; border-bottom: 1px solid #00ff41; padding-bottom: 5px; }
+        #mazeContainer { position: relative; background: #111; border: 2px solid #00ff41; margin: 0 auto; display: grid; overflow: hidden; }
+        .cell { width: 30px; height: 30px; box-sizing: border-box; }
+        .wall { background: #00ff41; box-shadow: inset 0 0 5px #000; }
+        .floor { background: #000; }
+        .player { background: #00ffff; border-radius: 50%; box-shadow: 0 0 8px #00ffff; position: relative; }
+        .key { background: #ffaa00; border-radius: 20%; box-shadow: 0 0 8px #ffaa00; }
+        .portal { background: #ff0055; border-radius: 10%; box-shadow: 0 0 8px #ff0055; opacity: 0.5; }
+        .portal.open { opacity: 1; background: #00ff41; box-shadow: 0 0 10px #00ff41; }
+        .enemy { background: #ff0000; border-radius: 40%; box-shadow: 0 0 8px #ff0000; }
+        .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 180px; margin: 15px auto 0 auto; }
+        .btn { background: #000; border: 1px solid #00ff41; color: #00ff41; padding: 12px; font-size: 1.3em; font-weight: bold; cursor: pointer; border-radius: 5px; box-shadow: 0 0 5px rgba(0,255,65,0.3); }
+        .btn:active { background: #00ff41; color: #000; }
+        #msg { margin-top: 10px; font-weight: bold; min-height: 20px; color: #ffaa00; }
+    </style>
+</head>
+<body>
+
+<div class="game-box">
+    <div class="hud">
+        <div>BOSQICH: <span id="lblLevel">1</span>/100</div>
+        <div>TANGALAR: <span id="lblCoins">0</span> 🪙</div>
+    </div>
+    <div id="mazeContainer"></div>
+    <div id="msg">Kalitni toping va Portalga boring!</div>
+    
+    <div class="controls">
+        <div></div><button class="btn" onclick="move(0, -1)">▲</button><div></div>
+        <button class="btn" onclick="move(-1, 0)">◀</button><button class="btn" onclick="move(0, 1)">▼</button><button class="btn" onclick="move(1, 0)">▶</button>
+    </div>
+</div>
+
+<script>
+    let ysdk;
+    YaGames.init().then(_sdk => { ysdk = _sdk; }).catch(e => {});
+
+    let level = 1;
+    let coins = 0;
+    let mapSize = 9; 
+    let grid = [];
+    let player = { x: 1, y: 1 };
+    let key = { x: 0, y: 0, found: false };
+    let portal = { x: 0, y: 0 };
+    let enemies = [];
+    let enemyInterval;
+
+    function generateMaze() {
+        mapSize = 9 + Math.floor(level / 5) * 2; 
+        if(mapSize > 15) mapSize = 15; 
+        
+        grid = [];
+        const container = document.getElementById("mazeContainer");
+        container.innerHTML = "";
+        container.style.gridTemplateColumns = repeat(${mapSize}, 30px);
+        container.style.gridTemplateRows = repeat(${mapSize}, 30px);
+
+        for (let y = 0; y < mapSize; y++) {
+            grid[y] = [];
+            for (let x = 0; x < mapSize; x++) {
+                if (x === 0  x === mapSize - 1  y === 0  y === mapSize - 1  (x % 2 === 0 && y % 2 === 0 && Math.random() > 0.3)) {
+                    grid[y][x] = 'W'; 
+                } else {
+                    grid[y][x] = 'F'; 
+                }
+            }
+        }
+
+        player.x = 1; player.y = 1;
+        grid[player.y][player.x] = 'F';
+
+        key.x = mapSize - 2; key.y = mapSize - 2; key.found = false;
+        portal.x = mapSize - 2; portal.y = 1;
+        enemies = [];
+        let enemyCount = Math.min(Math.floor(level / 3) + 1, 4);
+        for(let i=0; i<enemyCount; i++) {
+            let ex = Math.floor(Math.random() * (mapSize-3)) + 2;
+            let ey = Math.floor(Math.random() * (mapSize-3)) + 2;
+            if(grid[ey][ex] === 'F' && (ex !== player.x || ey !== player.y)) {
+                enemies.push({ x: ex, y: ey, dx: Math.random() > 0.5 ? 1 : -1, dy: Math.random() > 0.5 ? 1 : -1 });
+            }
+        }
+        
+        render();
+        startEnemyAI();
+    }
+
+    function render() {
+        const container = document.getElementById("mazeContainer");
+        container.innerHTML = "";
+        for (let y = 0; y < mapSize; y++) {
+            for (let x = 0; x < mapSize; x++) {
+                const cell = document.createElement("div");
+                cell.className = "cell";
+                if (grid[y][x] === 'W') cell.classList.add("wall");
+                else cell.classList.add("floor");
+
+                if (x === player.x && y === player.y) cell.classList.add("player");
+                else if (x === key.x && y === key.y && !key.found) cell.classList.add("key");
+                else if (x === portal.x && y === portal.y) {
+                    cell.classList.add("portal");
+                    if (key.found) cell.classList.add("open");
+                }
+                
+                enemies.forEach(e => {
+                    if(e.x === x && e.y === y) cell.classList.add("enemy");
+                });
+
+                container.appendChild(cell);
+            }
+        }
+    }
+
+    function move(dx, dy) {
+        let newX = player.x + dx;
+        let newY = player.y + dy;
+        
+        if (grid[newY][newX] !== 'W') {
+            player.x = newX;
+            player.y = newY;
+            checkLogic();
+            render();
+        }
+    }
+
+    function checkLogic() {
+        if (player.x === key.x && player.y === key.y && !key.found) {
+            key.found = true;
+            document.getElementById("msg").innerText = "🔑 Kalit topildi! Portal ochildi!";
+            document.getElementById("msg").style.color = "#00ff41";
+        }
+
+        if (player.x === portal.x && player.y === portal.y && key.found) {
+            clearInterval(enemyInterval);
+            coins += 100;
+            level++;
+            document.getElementById("lblCoins").innerText = coins;
+            document.getElementById("lblLevel").innerText = level;
+            
+            if (level > 100) {
+                document.getElementById("msg").innerText = "🎉 TABRIKLAYMIZ! SIZ DUNYONI QUTQARDINGIZ!";
+                document.getElementById("controlArea").style.display = "none";
+                return;
+            }
+            
+            document.getElementById("msg").innerText = "Keyingi murakkab darajaga o'tilmoqda...";
+            setTimeout(generateMaze, 1000);
+        }
+
+        enemies.forEach(e => {
+            if(e.x === player.x && e.y === player.y) {
+                hitByEnemy();
+            }
+        });
+    }
+
+    function startEnemyAI() {
+        clearInterval(enemyInterval);
+        let speed = Math.max(600 - (level * 10), 200); 
+        enemyInterval = setInterval(() => {
+            enemies.forEach(e => {
+                let nextX = e.x + e.dx;
+                let nextY = e.y + e.dy;
+                
+                if(grid[nextY][nextX] === 'W') {
+                    e.dx *= -1; e.dy *= -1;
+                } else {
+                    e.x = nextX; e.y = nextY;
+                }
+                
+                if(e.x === player.x && e.y === player.y) {
+                    hitByEnemy();
+                }
+            });
+            render();
+        }, speed);
+    }
+
+    function hitByEnemy() {
+        document.getElementById("msg").innerText = "🚨 Virusga chalindingiz! Bosqich boshidan boshlanadi.";
+        document.getElementById("msg").style.color = "#ff0000";
+        player.x = 1; player.y = 1;
+        key.found = false;
+        render();
+    }
+
+    window.onload = generateMaze;
+</script>
+</body>
+</html>
